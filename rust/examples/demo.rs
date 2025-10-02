@@ -31,21 +31,21 @@ fn main() -> Result<()> {
 
     // 3) Proxy key derivation
     println!("\n3. Deriving proxy keys...");
-    let (xp, yp) = proxy_signatures::derive_proxy_keys(&b, &a.pk, &token)?;
+    let keys = proxy_signatures::derive_proxy_keys(&b, &a.pk, &token)?;
     let ctx = ProxyPublicContext {
         warrant: warrant.to_vec(),
         rw: token.rw,
-        yp,
+        yp: keys.pk,
     };
     println!(
         "   Proxy public key YP: {}",
-        Hex::encode_to_string(yp).unwrap()
+        Hex::encode_to_string(keys.pk).unwrap()
     );
 
     // 4) Proxy signs
     println!("\n4. Creating proxy signature...");
     let msg = b"Pay 10 units to Carol";
-    let sig = proxy_signatures::proxy_sign(&xp, msg)?;
+    let sig = proxy_signatures::proxy_sign(&keys.sk, msg)?;
     println!("   Message: {}", std::str::from_utf8(msg)?);
     println!("   Signature created");
 

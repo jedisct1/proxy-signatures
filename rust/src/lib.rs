@@ -1,16 +1,18 @@
-//! # Ristretto255 Proxy Signatures
-//!
-//! Implementation of proxy signatures using the Ristretto255 prime-order group.
-//! Based on MUO '96 proxy notion with KPW '97 "partial delegation with warrant" instantiation.
-//!
-//! ## Protocol Flow
-//!
-//! 1. Delegation: Original signer A delegates signing authority to proxy B with warrant w
-//!    - A generates: `Rw = a*G`, `s_w = a + e_w*x_A` where `e_w = H(w || Rw)`
-//! 2. Verification: B verifies: `s_w*G == Rw + e_w*Y_A`
-//! 3. Key Derivation: B derives proxy key: `x_P = s_w + x_B (mod L)`, `Y_P = x_P*G`
-//! 4. Signing: B signs message m using Schnorr signature under `x_P`
-//! 5. Verification: Verifier reconstructs `Y_P` from `(w, Rw, Y_A, Y_B)` and verifies signature
+#![doc = include_str!("../README.md")]
+
+// # Ristretto255 Proxy Signatures
+//
+// Implementation of proxy signatures using the Ristretto255 prime-order group.
+// Based on MUO '96 proxy notion with KPW '97 "partial delegation with warrant" instantiation.
+//
+// ## Protocol Flow
+//
+// 1. Delegation: Original signer A delegates signing authority to proxy B with warrant w
+//    - A generates: `Rw = a*G`, `s_w = a + e_w*x_A` where `e_w = H(w || Rw)`
+// 2. Verification: B verifies: `s_w*G == Rw + e_w*Y_A`
+// 3. Key Derivation: B derives proxy key: `x_P = s_w + x_B (mod L)`, `Y_P = x_P*G`
+// 4. Signing: B signs message m using Schnorr signature under `x_P`
+// 5. Verification: Verifier reconstructs `Y_P` from `(w, Rw, Y_A, Y_B)` and verifies signature
 
 pub mod reexports {
     pub use ct_codecs;
@@ -240,7 +242,6 @@ impl SchnorrSignature {
         let e_times_pk = scalarmult_ristretto::scalarmult(&e, pk)?;
         let right = ristretto255::add(&self.r, &e_times_pk)?;
 
-        // Use constant-time comparison
         Ok(utils::memcmp(&left, &right))
     }
 }
@@ -350,7 +351,6 @@ impl DelegationToken {
         let e_times_a = scalarmult_ristretto::scalarmult(&e_w, a_pub)?;
         let right = ristretto255::add(&self.rw, &e_times_a)?;
 
-        // Use constant-time comparison
         Ok(utils::memcmp(&left, &right))
     }
 }
@@ -518,6 +518,22 @@ impl Hash for ProxyKeyPair {
     }
 }
 
+/// Derived proxy keys with named fields for better type safety
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ProxyKeys {
+    /// Proxy's derived secret key
+    pub sk: Scalar,
+    /// Proxy's derived public key
+    pub pk: Point,
+}
+
+impl ProxyKeys {
+    /// Create a new ProxyKeys instance
+    pub fn new(sk: Scalar, pk: Point) -> Self {
+        ProxyKeys { sk, pk }
+    }
+}
+
 /// Derive proxy signing keys from a delegation token
 ///
 /// # Arguments
@@ -526,7 +542,7 @@ impl Hash for ProxyKeyPair {
 /// * `token` - Valid delegation token bound to this proxy
 ///
 /// # Returns
-/// A tuple of (proxy secret key, proxy public key)
+/// A `ProxyKeys` struct with named `sk` and `pk` fields for better type safety
 ///
 /// # Errors
 /// Returns `InvalidDelegation` if token verification fails, `ProxyKeyMismatch`
@@ -536,7 +552,7 @@ pub fn derive_proxy_keys(
     b_keys: &KeyPair,
     a_pub: &Point,
     token: &DelegationToken,
-) -> Result<(Scalar, Point)> {
+) -> Result<ProxyKeys> {
     // Verify that this proxy is the one bound to the delegation token
     if !utils::memcmp(&b_keys.pk, &token.b_pub) {
         return Err(ProxySignatureError::ProxyKeyMismatch);
@@ -556,12 +572,11 @@ pub fn derive_proxy_keys(
     let temp = ristretto255::add(&token.rw, &e_times_a)?;
     let yp_from_relation = ristretto255::add(&temp, &b_keys.pk)?;
 
-    // Use constant-time comparison
     if !utils::memcmp(&yp_from_secret, &yp_from_relation) {
         return Err(ProxySignatureError::ProxyKeyMismatch);
     }
 
-    Ok((xp, yp_from_secret))
+    Ok(ProxyKeys::new(xp, yp_from_secret))
 }
 
 /// Derive proxy signing key pair from a delegation token
@@ -582,8 +597,11 @@ pub fn derive_proxy_key_pair(
     a_pub: &Point,
     token: &DelegationToken,
 ) -> Result<ProxyKeyPair> {
-    let (xp, yp) = derive_proxy_keys(b_keys, a_pub, token)?;
-    Ok(ProxyKeyPair { sk: xp, pk: yp })
+    let keys = derive_proxy_keys(b_keys, a_pub, token)?;
+    Ok(ProxyKeyPair {
+        sk: keys.sk,
+        pk: keys.pk,
+    })
 }
 
 /// Create a proxy signature for a message
@@ -707,17 +725,17 @@ mod tests {
         assert!(token.verify(&a.pk)?);
 
         // Step 2: Derive proxy keys
-        let (xp, yp) = derive_proxy_keys(&b, &a.pk, &token)?;
+        let keys = derive_proxy_keys(&b, &a.pk, &token)?;
 
         // Step 3: Create proxy signature
         let message = b"Authorize payment of 100 units";
-        let sig = proxy_sign(&xp, message)?;
+        let sig = proxy_sign(&keys.sk, message)?;
 
         // Step 4: Verify proxy signature
         let ctx = ProxyPublicContext {
             warrant: warrant.to_vec(),
             rw: token.rw,
-            yp,
+            yp: keys.pk,
         };
 
         assert!(proxy_verify(&a.pk, &b.pk, message, &sig, &ctx)?);
@@ -730,7 +748,7 @@ mod tests {
         let bad_ctx = ProxyPublicContext {
             warrant: b"Different warrant".to_vec(),
             rw: token.rw,
-            yp,
+            yp: keys.pk,
         };
         assert!(!proxy_verify(&a.pk, &b.pk, message, &sig, &bad_ctx)?);
 
@@ -774,9 +792,9 @@ mod tests {
         assert!(token.verify(&a.pk)?);
 
         // B can derive proxy keys
-        let (xp_b, yp_b) = derive_proxy_keys(&b, &a.pk, &token)?;
-        assert_eq!(xp_b.len(), 32);
-        assert_eq!(yp_b.len(), 32);
+        let keys_b = derive_proxy_keys(&b, &a.pk, &token)?;
+        assert_eq!(keys_b.sk.len(), 32);
+        assert_eq!(keys_b.pk.len(), 32);
 
         // C cannot use B's delegation token (proxy binding prevents this)
         match derive_proxy_keys(&c, &a.pk, &token) {
@@ -786,13 +804,13 @@ mod tests {
 
         // Create proxy signature with B's keys
         let message = b"Test message";
-        let sig = proxy_sign(&xp_b, message)?;
+        let sig = proxy_sign(&keys_b.sk, message)?;
 
         // Verify works with correct proxy
         let ctx = ProxyPublicContext {
             warrant: warrant.to_vec(),
             rw: token.rw,
-            yp: yp_b,
+            yp: keys_b.pk,
         };
         assert!(proxy_verify(&a.pk, &b.pk, message, &sig, &ctx)?);
 
@@ -819,13 +837,6 @@ mod tests {
         let message = b"Test message";
         let sig = proxy_keys.sign(message)?;
         assert!(sig.verify(&proxy_keys.pk, message)?);
-
-        // Type safety: Cannot pass ProxyKeyPair to DelegationToken::create
-        // The following would not compile:
-        // let token_bc = DelegationToken::create(&proxy_keys, &c.pk, warrant_bc);
-        //
-        // This prevents proxy-to-proxy redelegation at compile time!
-        // No runtime check needed - the type system enforces this constraint.
 
         // Verify that proxy keys work for their intended purpose (signing)
         let sig2 = proxy_sign(&proxy_keys.sk, b"Another message")?;

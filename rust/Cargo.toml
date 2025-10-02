@@ -1,11 +1,13 @@
 [package]
 name = "proxy-signatures"
-version = "0.1.0"
+description = "Proxy signatures with delegation by warrant"
+license = "MIT"
+version = "0.2.0"
 edition = "2021"
 homepage = "https://github.com/jedisct1/rust-proxy-signatures"
 repository = "https://github.com/jedisct1/rust-proxy-signatures"
 readme = "README.md"
-author = "Frank Denis <github@pureftpd.org>"
+authors = ["Frank Denis <github@pureftpd.org>"]
 
 [dependencies]
 libsodium-rs = "0.2.1"
