@@ -85,8 +85,8 @@ pub const SchnorrSignature = struct {
     }
 };
 
-/// Maximum warrant size (256 bytes should be enough for most use cases)
-pub const MAX_WARRANT_SIZE = 256;
+/// Maximum warrant size (4096 bytes should be enough for most use cases)
+pub const MAX_WARRANT_SIZE = 4096;
 
 /// Warrant type - fixed size buffer with actual length
 pub const Warrant = struct {
