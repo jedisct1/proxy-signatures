@@ -18,7 +18,7 @@ pub const KeyPair = struct {
 
     /// Generate a new random key pair
     pub fn new() KeyPair {
-        const sk = Scalar.random();
+        const sk = randomScalar();
         const pk = Point.basePoint.mul(sk.toBytes()) catch unreachable;
         return .{ .sk = sk, .pk = pk };
     }
@@ -46,6 +46,17 @@ pub const KeyPair = struct {
 };
 
 /// Hash multiple byte arrays to produce a Ristretto255 scalar
+fn randomScalar() Scalar {
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    defer threaded.deinit();
+    var bytes: [64]u8 = undefined;
+    while (true) {
+        threaded.io().randomSecure(&bytes) catch @panic("unable to obtain random bytes");
+        const scalar = Scalar.fromBytes64(bytes);
+        if (!scalar.isZero()) return scalar;
+    }
+}
+
 fn hashToScalar(parts: []const []const u8) !Scalar {
     var hasher = crypto.hash.blake2.Blake2b512.init(.{});
     for (parts) |part| hasher.update(part);
@@ -64,7 +75,7 @@ pub const SchnorrSignature = struct {
 
     /// Create a Schnorr signature for a message using a secret key
     pub fn sign(sk: *const Scalar, msg: []const u8) !SchnorrSignature {
-        const k = Scalar.random();
+        const k = randomScalar();
         const r = try Point.basePoint.mul(k.toBytes());
 
         const r_bytes = r.toBytes();
@@ -119,7 +130,7 @@ pub const DelegationToken = struct {
 
     /// Create a delegation token authorizing a specific proxy
     pub fn create(a_keys: *const KeyPair, b_pub: *const Point, warrant: []const u8) !DelegationToken {
-        const a_nonce = Scalar.random();
+        const a_nonce = randomScalar();
         const rw = try Point.basePoint.mul(a_nonce.toBytes());
 
         // Include proxy's public key in the hash to bind the delegation
@@ -368,7 +379,7 @@ test "invalid delegation" {
 
     // Tamper with sw by modifying the scalar
     // Create a scalar with value 1 by creating bytes array with 1 in the first position
-    const one_bytes = [_]u8{1} ++ [_]u8{0} ** 31;
+    const one_bytes = [_]u8{1} ++ @as([31]u8, @splat(0));
     const one_scalar = Scalar.fromBytes(one_bytes);
     token.sw = token.sw.add(one_scalar);
 
